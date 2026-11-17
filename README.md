@@ -13,6 +13,7 @@ k8s/nginx-pod.yaml         # EKS API 스모크 테스트용 매니페스트
 scripts/env.ps1            # AWS_* 환경변수를 에뮬레이터로 설정 (dot-source, Windows 직접 실행용)
 scripts/reset-state.ps1    # 에뮬레이터 재기동 후 tfstate 삭제
 env/eks-test1/             # Terraform 환경 #1 (S3 + VPC + IAM + EKS)
+env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data nginx)
 ```
 
 ## 실행 순서 (PowerShell)
@@ -61,6 +62,32 @@ env/eks-test1/             # Terraform 환경 #1 (S3 + VPC + IAM + EKS)
 - `/openapi/v2` 없음 → `--validate=false` 필요
 
 → **nginx를 실제로 띄워 보는 테스트는 에뮬레이터로 불가능.** EKS 리소스를 Terraform으로 만드는 테스트까지가 범위다.
+
+## EC2 + nginx (env/ec2-test1)
+```powershell
+.\scripts\tf.ps1 -Env ec2-test1 init
+.\scripts\tf.ps1 -Env ec2-test1 apply -auto-approve
+.\scripts\tf.ps1 -Env ec2-test1 output
+.\scripts\aws.ps1 ec2 describe-instances --filters 'Name=tag:Env,Values=ec2-test1' --output table
+```
+- AMI: 공개 SSM 파라미터 `/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` (`-var ami_id=...`로 지정 가능)
+- `user_data.sh`: AL2023에 nginx 설치 + 인스턴스 ID 페이지 (IMDSv2)
+- 실제 AWS에도 그대로 쓸 수 있게 작성 (단, `allowed_http_cidr` 기본값 `0.0.0.0/0`은 좁힐 것, SSH/키페어 없음)
+
+에뮬레이터 실측:
+| 항목 | 결과 |
+|---|---|
+| SSM 파라미터로 AMI 조회 | 성공 |
+| VPC / Subnet / IGW / RT / SG(80) | 성공 |
+| `aws_instance` | 성공, `running`, 퍼블릭 IP 할당 (`54.0.0.x`) |
+| user_data | 인스턴스 속성에 저장됨 (원본과 바이트 일치) |
+| `http://<public_ip>` | **응답 없음** — 에뮬레이터는 게스트 OS를 부팅하지 않아 user_data/nginx가 실행되지 않음 |
+| 재 plan / destroy / 재 apply | 변경 없음 / 성공 / 성공 |
+
+에뮬레이터 대응으로 넣은 것:
+- `availability_zone` 명시: 없으면 RunInstances가 `Invalid value '' for availabilityZone`으로 거부됨 (실제 AWS는 서브넷에서 추론)
+- launch template 미사용: RunInstances + LaunchTemplate은 501
+- `m5.large`: T 계열은 #422
 
 ## 실측 결과 (2026-11-17, emulator LTS latest, Terraform 1.13.4, hashicorp/aws 6.22.1)
 | 항목 | 결과 |
@@ -115,6 +142,9 @@ Terraform 코어 ↔ provider 플러그인 간 mTLS도 깨진다. 프로그램 �
 
 ### Windows `curl.exe`로 health 체크 실패
 `curl.exe`(schannel)는 에뮬레이터 자체서명 인증서를 `the certificate chain is incomplete`로 거부한다. 컨테이너 안의 curl을 쓰거나 `docker logs aws-emulator`로 기동을 확인한다.
+
+### PowerShell에서 쉼표가 들어간 인자
+`Name=tag:Env,Values=x`, `pod,svc`처럼 쉼표가 있는 인자는 PowerShell이 배열로 쪼갠다. 작은따옴표로 감쌀 것.
 
 ### EKS endpoint 접근
 endpoint 포트는 에뮬레이터 컨테이너 안에만 열린다. `--network container:aws-emulator`로 띄운 컨테이너에서 `aws eks get-token`으로 토큰을 받아 호출한다.
