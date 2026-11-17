@@ -1,0 +1,25 @@
+# Emulated EKS API smoke test.
+# - Only these kinds are served: Namespace, Pod, ConfigMap, ServiceAccount, Node, RBAC
+#   (no Deployment / Service / Ingress).
+# - The emulator stores the Pod but does NOT run containers -> phase Failed (StartError).
+# - PATCH/DELETE are refused, so `apply` only works the first time (use `create`).
+#
+#   .\scripts\kubectl.ps1 create --validate=false -f k8s/nginx-pod.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-test
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: nginx-test
+  labels:
+    app: nginx
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.27
+      ports:
+        - containerPort: 80

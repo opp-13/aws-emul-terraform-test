@@ -1,0 +1,7 @@
+**/.terraform/
+**/.terraform-linux/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.kubeconfig
