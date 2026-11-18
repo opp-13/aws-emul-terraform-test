@@ -5,13 +5,19 @@
 .PARAMETER Auth
   'off' (default) disables SigV4 checks. Needed for aws_s3_bucket because of
   https://github.com/aws/aws-emulator/issues/353 (anonymous HeadBucket -> 403).
+
+.PARAMETER StackportPort
+  Also published on this container so scripts/stackport.ps1 can join its
+  network afterwards (a container joining another's netns can't publish its
+  own ports).
 #>
 param(
     [int]$Port = 9297,
     [ValidateSet('on', 'off')][string]$Auth = 'off',
     [switch]$Rebuild,
     [string]$Image = 'aws-emulator',
-    [string]$Name = 'aws-emulator'
+    [string]$Name = 'aws-emulator',
+    [int]$StackportPort = 8080
 )
 # 'Continue': in Windows PowerShell 5.1, docker's progress output on stderr would
 # otherwise be raised as a terminating error. Failures are checked via $LASTEXITCODE.
@@ -31,6 +37,7 @@ docker rm -f $Name 2>$null | Out-Null
 
 docker run -d --rm --name $Name --memory=2g --memory-swap=2g `
     -p "127.0.0.1:${Port}:${Port}" `
+    -p "127.0.0.1:${StackportPort}:${StackportPort}" `
     -v "${shared}:/home/emulator/.aws/emulator" `
     $Image -p $Port -a $Auth --telemetry off | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'docker run failed' }

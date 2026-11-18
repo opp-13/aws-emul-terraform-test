@@ -4,17 +4,26 @@
 
 ## 구조
 ```
-emulator/Dockerfile        # 공식 문서의 Dockerfile (공식 이미지 없음 → 직접 빌드)
-scripts/start-emulator.ps1 # 이미지 빌드 + 127.0.0.1:9297 실행 + health 체크
-scripts/tf.ps1             # Terraform을 에뮬레이터 네트워크의 컨테이너에서 실행 (Avast 우회)
-scripts/aws.ps1            # AWS CLI를 같은 방식으로 실행 (리소스 조회용)
-scripts/kubectl.ps1        # 에뮬레이트된 EKS 클러스터에 kubectl 실행 (토큰/CA 자동)
-k8s/nginx-pod.yaml         # EKS API 스모크 테스트용 매니페스트
-scripts/env.ps1            # AWS_* 환경변수를 에뮬레이터로 설정 (dot-source, Windows 직접 실행용)
-scripts/reset-state.ps1    # 에뮬레이터 재기동 후 tfstate 삭제
-env/eks-test1/             # Terraform 환경 #1 (S3 + VPC + IAM + EKS)
-env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data nginx)
+emulator/Dockerfile          # 공식 문서의 Dockerfile (공식 이미지 없음 → 직접 빌드)
+scripts/start-emulator.ps1   # (Windows) 이미지 빌드 + 127.0.0.1:9297 실행 + health 체크
+scripts/start-emulator.sh    # (Linux/bash) 위와 동일
+scripts/tf.ps1               # (Windows) Terraform을 에뮬레이터 네트워크의 컨테이너에서 실행 (Avast 우회)
+scripts/tf.sh                # (Linux/bash) 위와 동일
+scripts/aws.ps1              # (Windows) AWS CLI를 같은 방식으로 실행 (리소스 조회용)
+scripts/aws.sh               # (Linux/bash) 위와 동일
+scripts/kubectl.ps1          # (Windows) 에뮬레이트된 EKS 클러스터에 kubectl 실행 (토큰/CA 자동)
+scripts/kubectl.sh           # (Linux/bash) 위와 동일
+scripts/stackport.ps1        # (Windows) StackPort 웹 콘솔(http://127.0.0.1:8080)을 에뮬레이터 네트워크에서 실행
+scripts/stackport.sh         # (Linux/bash) 위와 동일
+k8s/nginx-pod.yaml           # EKS API 스모크 테스트용 매니페스트
+scripts/env.ps1              # (Windows) AWS_* 환경변수를 에뮬레이터로 설정 (dot-source)
+scripts/env.sh               # (Linux/bash) 위와 동일 (source로 실행)
+scripts/reset-state.ps1      # (Windows) 에뮬레이터 재기동 후 tfstate 삭제
+scripts/reset-state.sh       # (Linux/bash) 위와 동일
+env/eks-test1/               # Terraform 환경 #1 (S3 + VPC + IAM + EKS)
+env/ec2-test1/                # Terraform 환경 #2 (VPC + SG + EC2 + user_data nginx)
 ```
+각 `.sh`는 대응하는 `.ps1`과 동일한 docker 커맨드/환경변수를 그대로 재현한다 (컨테이너는 항상 Linux 컨테이너로 실행되므로 리눅스/Windows 어느 쪽에서 돌려도 결과는 같다).
 
 ## 실행 순서 (PowerShell)
 이 PC에서는 Avast가 로컬 HTTPS를 가로채므로(아래 트러블슈팅) **Terraform을 컨테이너로 실행**한다.
@@ -34,8 +43,24 @@ env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data ngi
 - Avast HTTPS 스캔을 끈 PC라면 `. .\scripts\env.ps1` 후 Windows의 `terraform` / `aws`를 직접 써도 된다.
 - 에뮬레이터는 모든 리소스를 메모리에 둔다. 컨테이너를 재시작했다면 `.\scripts\reset-state.ps1`로 tfstate를 지울 것.
 
+## 실행 순서 (Linux/bash)
+위와 동일한 동작을 bash 스크립트로 수행한다 (Docker 엔진만 있으면 되고 `pwsh` 설치는 불필요).
+```bash
+# 1) Docker 실행 중인지 확인 후
+./scripts/start-emulator.sh              # 기본: --auth off, --telemetry off
+
+# 2) Terraform (컨테이너 실행, 기본 환경 eks-test1)
+./scripts/tf.sh init
+./scripts/tf.sh apply -auto-approve
+./scripts/tf.sh output
+./scripts/tf.sh destroy -auto-approve
+./scripts/tf.sh --env other-env plan     # 다른 env/<이름> 대상
+```
+- `source ./scripts/env.sh` 후 호스트의 `terraform` / `aws`를 직접 써도 된다 (호스트 HTTPS를 가로채는 프로그램이 없다면).
+- 에뮬레이터는 모든 리소스를 메모리에 둔다. 컨테이너를 재시작했다면 `./scripts/reset-state.sh`로 tfstate를 지울 것.
+
 ## 리소스 조회 (콘솔 없음)
-에뮬레이터에는 GUI/콘솔이 없다. CLI로 조회한다.
+에뮬레이터 자체에는 GUI/콘솔이 없다 (아래 [StackPort](#stackport-웹-콘솔) 섹션 참고). CLI로 조회한다.
 ```powershell
 .\scripts\tf.ps1 state list                     # Terraform이 관리하는 리소스
 .\scripts\tf.ps1 state show aws_eks_cluster.this[0]
@@ -43,6 +68,14 @@ env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data ngi
 .\scripts\aws.ps1 ec2 describe-vpcs --output table
 .\scripts\aws.ps1 eks describe-cluster --name eks-test1
 .\scripts\aws.ps1 resourcegroupstaggingapi get-resources --output table   # 태그 붙은 전체 리소스
+```
+```bash
+./scripts/tf.sh state list                      # Terraform이 관리하는 리소스
+./scripts/tf.sh state show aws_eks_cluster.this[0]
+./scripts/aws.sh s3 ls
+./scripts/aws.sh ec2 describe-vpcs --output table
+./scripts/aws.sh eks describe-cluster --name eks-test1
+./scripts/aws.sh resourcegroupstaggingapi get-resources --output table   # 태그 붙은 전체 리소스
 ```
 
 ## EKS 접근 (kubectl)
@@ -52,7 +85,14 @@ env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data ngi
 .\scripts\kubectl.ps1 create --validate=false -f k8s/nginx-pod.yaml
 .\scripts\kubectl.ps1 get pod nginx -n nginx-test -o "jsonpath={.status.phase} / {.status.message}"
 ```
-`kubectl.ps1`이 `describe-cluster`로 endpoint/CA를, `aws eks get-token`으로 토큰을 받아 kubectl 컨테이너에 넘긴다.
+```bash
+./scripts/kubectl.sh get nodes
+./scripts/kubectl.sh api-resources
+./scripts/kubectl.sh create --validate=false -f k8s/nginx-pod.yaml
+./scripts/kubectl.sh get pod nginx -n nginx-test -o "jsonpath={.status.phase} / {.status.message}"
+./scripts/kubectl.sh --cluster other get pod,svc -n demo   # bash는 쉼표를 인자로 쪼개지 않으므로 따옴표 불필요
+```
+`kubectl.ps1`/`kubectl.sh`가 `describe-cluster`로 endpoint/CA를, `aws eks get-token`으로 토큰을 받아 kubectl 컨테이너에 넘긴다.
 
 에뮬레이트된 K8s API 실측 지원 범위:
 - 제공 리소스: Namespace, Pod, ConfigMap, ServiceAccount, Node, Role/RoleBinding/ClusterRole/ClusterRoleBinding, SelfSubjectReview
@@ -63,12 +103,32 @@ env/ec2-test1/             # Terraform 환경 #2 (VPC + SG + EC2 + user_data ngi
 
 → **nginx를 실제로 띄워 보는 테스트는 에뮬레이터로 불가능.** EKS 리소스를 Terraform으로 만드는 테스트까지가 범위다.
 
+## StackPort (웹 콘솔)
+[StackPort](https://github.com/DaviReisVieira/stackport)는 AWS Emulator 전용 웹 콘솔/대시보드다. `$HOME\.aws\emulator\<Port>`(Windows) / `$HOME/.aws/emulator/<Port>`(Linux) 아래의 `ca.pem`을 그대로 활용하므로 별도 설정 없이 붙는다.
+`scripts/aws.ps1`/`aws.sh`와 같은 방식으로 에뮬레이터 컨테이너의 네트워크(`--network container:aws-emulator`)에서 실행되고, 포트는 `start-emulator`가 미리 퍼블리시해 둔다 (네트워크를 공유하는 컨테이너는 자기 포트를 직접 퍼블리시할 수 없음).
+```powershell
+.\scripts\start-emulator.ps1            # 기본적으로 StackPort용 8080도 같이 퍼블리시됨
+.\scripts\stackport.ps1                 # http://127.0.0.1:8080
+```
+```bash
+./scripts/start-emulator.sh             # 기본적으로 StackPort용 8080도 같이 퍼블리시됨
+./scripts/stackport.sh                  # http://127.0.0.1:8080
+```
+- 이미 떠 있는 에뮬레이터를 8080 퍼블리시 없이 띄웠다면(구버전으로 기동), `-StackportPort`/`--stackport-port`를 쓰거나 에뮬레이터를 재기동할 것.
+- 브라우저에서 `http://127.0.0.1:8080` 접속 → S3/DynamoDB/Lambda/IAM/EC2 등 리소스 브라우저 + API 탐색기 사용 가능.
+
 ## EC2 + nginx (env/ec2-test1)
 ```powershell
 .\scripts\tf.ps1 -Env ec2-test1 init
 .\scripts\tf.ps1 -Env ec2-test1 apply -auto-approve
 .\scripts\tf.ps1 -Env ec2-test1 output
 .\scripts\aws.ps1 ec2 describe-instances --filters 'Name=tag:Env,Values=ec2-test1' --output table
+```
+```bash
+./scripts/tf.sh --env ec2-test1 init
+./scripts/tf.sh --env ec2-test1 apply -auto-approve
+./scripts/tf.sh --env ec2-test1 output
+./scripts/aws.sh ec2 describe-instances --filters 'Name=tag:Env,Values=ec2-test1' --output table
 ```
 - AMI: 공개 SSM 파라미터 `/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` (`-var ami_id=...`로 지정 가능)
 - `user_data.sh`: AL2023에 nginx 설치 + 인스턴스 ID 페이지 (IMDSv2)
@@ -145,6 +205,7 @@ Terraform 코어 ↔ provider 플러그인 간 mTLS도 깨진다. 프로그램 �
 
 ### PowerShell에서 쉼표가 들어간 인자
 `Name=tag:Env,Values=x`, `pod,svc`처럼 쉼표가 있는 인자는 PowerShell이 배열로 쪼갠다. 작은따옴표로 감쌀 것.
+(bash에는 이 문제가 없다 — 쉼표는 bash에서 특별한 의미가 없으므로 따옴표 없이 그대로 써도 된다.)
 
 ### EKS endpoint 접근
 endpoint 포트는 에뮬레이터 컨테이너 안에만 열린다. `--network container:aws-emulator`로 띄운 컨테이너에서 `aws eks get-token`으로 토큰을 받아 호출한다.
